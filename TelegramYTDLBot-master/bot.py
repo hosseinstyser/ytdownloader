@@ -4,7 +4,10 @@ import threading
 import yt_dlp
 from queue import Queue
 from urllib.parse import urlparse, parse_qs
-
+PROXY = {
+    'http': 'http://185.199.229.156:7492',  # پروکسی رایگان نمونه
+    'https': 'http://185.199.229.156:7492'
+}
 # تنظیمات اولیه
 TOKEN = "8043273209:AAHYz7Wiabbz-ARgUN6dfaUnwoibybradyo"
 DOWNLOAD_DIR = "downloads"
@@ -16,6 +19,7 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 # تنظیمات yt-dlp برای جلوگیری از خطاهای 403
 ydl_opts_base = {
+    'proxy': PROXY['http'],
     'quiet': True,
     'no_warnings': True,
     'restrictfilenames': True,
