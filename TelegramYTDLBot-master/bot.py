@@ -34,6 +34,7 @@ def download_worker(bot, queue):
         message, video_url, quality = queue.get()
         try:
             ydl_opts = {
+                'proxy': 'http://127.0.0.1:8080',
                 'format': select_format(quality),
                 'outtmpl': 'downloads/%(title)s.%(ext)s',
                 'quiet': True,
