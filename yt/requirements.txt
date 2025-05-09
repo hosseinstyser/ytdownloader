@@ -1,3 +1,4 @@
 requests
-python-telegram-bot==13.7
+python-telegram-bot==20.3
 yt-dlp
+urllib3==1.26.18
