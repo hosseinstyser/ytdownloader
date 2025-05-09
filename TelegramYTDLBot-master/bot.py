@@ -1,196 +1,137 @@
 import os
 import telebot
-import threading
 import yt_dlp
-from queue import Queue
-from urllib.parse import urlparse, parse_qs
+import socket
+import urllib3
+from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor
+from functools import wraps
+
+# تنظیمات پایه
+TOKEN = "8043273209:AAHYz7Wiabbz-ARgUN6dfaUnwoibybradyo"
+DOWNLOAD_DIR = "downloads"
+MAX_RETRIES = 3
+TIMEOUT = 30
+
+# تنظیمات پروکسی (برای کاربران ایرانی ضروری)
 PROXY = {
     'http': 'http://185.199.229.156:7492',  # پروکسی رایگان نمونه
     'https': 'http://185.199.229.156:7492'
 }
-# تنظیمات اولیه
-TOKEN = "8043273209:AAHYz7Wiabbz-ARgUN6dfaUnwoibybradyo"
-DOWNLOAD_DIR = "downloads"
-MAX_FILE_SIZE = 2000 * 1024 * 1024  # حداکثر حجم فایل: 2GB
 
-# ایجاد پوشه دانلود اگر وجود نداشته باشد
-if not os.path.exists(DOWNLOAD_DIR):
-    os.makedirs(DOWNLOAD_DIR)
+# ایجاد پوشه دانلود
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# تنظیمات yt-dlp برای جلوگیری از خطاهای 403
-ydl_opts_base = {
-    'proxy': PROXY['http'],
+# تنظیمات yt-dlp
+ydl_opts = {
+    'format': 'bestvideo[height<=720]+bestaudio/best[height<=720]',
+    'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
     'quiet': True,
     'no_warnings': True,
-    'restrictfilenames': True,
-    'noplaylist': True,
-    'socket_timeout': 30,
-    'retries': 10,
+    'socket_timeout': TIMEOUT,
+    'retries': MAX_RETRIES,
+    'proxy': PROXY['http'],
     'http_headers': {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.google.com/'
     },
+    'extract_flat': True,
+    'force_ipv4': True,
+    'ratelimit': 1000000,  # محدودیت سرعت دانلود (1MB/s)
 }
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
-download_queue = Queue()
+executor = ThreadPoolExecutor(max_workers=4)
 
-def get_video_info(video_url):
-    """دریافت اطلاعات ویدیو بدون دانلود"""
-    with yt_dlp.YoutubeDL(ydl_opts_base) as ydl:
+# دکوراتور مدیریت خطاها
+def handle_errors(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
         try:
-            return ydl.extract_info(video_url, download=False)
-        except Exception as e:
-            raise Exception(f"خطا در دریافت اطلاعات ویدیو: {str(e)}")
-
-def download_video(video_url, quality):
-    """دانلود ویدیو با کیفیت مشخص"""
-    ydl_opts = ydl_opts_base.copy()
-    
-    # تنظیم کیفیت
-    if quality == 'low':
-        ydl_opts['format'] = 'worst[height<=360][ext=mp4]'
-    elif quality == 'medium':
-        ydl_opts['format'] = 'best[height<=720][ext=mp4]'
-    else:  # high
-        ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]'
-    
-    # محدودیت حجم فایل
-    ydl_opts['max_filesize'] = MAX_FILE_SIZE
-    
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(video_url, download=False)
-            file_path = ydl.prepare_filename(info)
-            ydl.download([video_url])
-            return file_path, info
+            return func(*args, **kwargs)
         except yt_dlp.DownloadError as e:
             if "HTTP Error 403" in str(e):
-                raise Exception("خطای دسترسی (403) - ممکن است نیاز به VPN داشته باشید")
-            raise Exception(f"خطا در دانلود: {str(e)}")
-
-def download_worker():
-    """پردازشگر صف دانلود"""
-    while True:
-        message, video_url, quality = download_queue.get()
-        try:
-            file_path, info = download_video(video_url, quality)
-            
-            # ارسال ویدیو
-            with open(file_path, 'rb') as video_file:
-                bot.send_video(
-                    chat_id=message.chat.id,
-                    video=video_file,
-                    caption=f"🎬 {info['title']}\n"
-                           f"🕒 مدت: {info.get('duration_string', 'نامعلوم')}\n"
-                           f"📊 کیفیت: {quality}",
-                    supports_streaming=True,
-                    timeout=300
-                )
-            
-            # حذف فایل موقت
-            os.remove(file_path)
-            
+                return "⚠️ خطای دسترسی (403)\nلطفاً از VPN استفاده کنید"
+            elif "HTTP Error 404" in str(e):
+                return "❌ ویدیو یافت نشد (404)"
+            return f"❌ خطای دانلود: {str(e)}"
+        except (socket.timeout, urllib3.exceptions.TimeoutError):
+            return "⏳ زمان اتصال به پایان رسید\nلطفاً دوباره تلاش کنید"
         except Exception as e:
-            error_msg = f"❌ خطا در پردازش درخواست:\n{str(e)}"
-            if "HTTP Error" in str(e):
-                error_msg += "\n\n🔧 راهکار:\n1. از VPN استفاده کنید\n2. لینک را بررسی کنید\n3. دوباره امتحان کنید"
-            bot.send_message(message.chat.id, error_msg)
-        finally:
-            download_queue.task_done()
+            return f"❌ خطای غیرمنتظره: {str(e)}"
+    return wrapper
 
-# راه اندازی کارگر دانلود
-threading.Thread(target=download_worker, daemon=True).start()
-
-def is_youtube_url(url):
-    """بررسی اعتبار لینک یوتیوب"""
-    try:
-        domains = ('youtube.com', 'www.youtube.com', 'youtu.be', 'm.youtube.com')
-        parsed = urlparse(url)
-        if any(domain in parsed.netloc for domain in domains):
-            return True
-        return False
-    except:
-        return False
+@handle_errors
+def download_video(url):
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        
+        # بررسی محدودیت‌ها
+        if info.get('age_limit', 0) >= 18:
+            return "🔞 این ویدیو محدودیت سنی دارد"
+        
+        if info.get('is_live', False):
+            return "📡 ویدیوی زنده قابل دانلود نیست"
+        
+        # دانلود واقعی
+        ydl.download([url])
+        return info
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    """پیام خوشآمدگویی"""
-    bot.reply_to(message, 
-        "🤖 ربات دانلود از یوتیوب\n\n"
-        "لینک ویدیوی یوتیوب را برای من بفرستید\n\n"
-        "برای راهنمایی /help را بفرستید")
+    welcome_msg = """
+🎬 <b>ربات دانلود از یوتیوب</b>
 
-@bot.message_handler(commands=['help'])
-def send_help(message):
-    """راهنمای استفاده"""
-    bot.reply_to(message,
-        "📚 راهنمای استفاده:\n\n"
-        "1. لینک ویدیو را ارسال کنید\n"
-        "2. کیفیت مورد نظر را انتخاب کنید\n"
-        "3. منتظر بمانید تا ویدیو ارسال شود\n\n"
-        "⚙️ کیفیت‌های قابل انتخاب:\n"
-        "- کیفیت پایین (سریع)\n"
-        "- کیفیت متوسط (متوازن)\n"
-        "- کیفیت بالا (بهترین)\n\n"
-        "⚠️ توجه: ویدیوهای بیش از 2GB دانلود نمی‌شوند",
-        disable_web_page_preview=True)
+🔹 لینک ویدیوی یوتیوب را ارسال کنید
+🔹 حداکثر کیفیت: 720p
+🔹 حداکثر حجم: 2GB
+
+🛠 <i>پشتیبانی: @dev00111</i>
+"""
+    bot.reply_to(message, welcome_msg)
 
 @bot.message_handler(func=lambda m: True)
 def handle_message(message):
-    """پردازش لینک دریافتی"""
-    if not is_youtube_url(message.text):
-        bot.reply_to(message, "⚠️ لطفاً یک لینک معتبر یوتیوب ارسال کنید")
+    url = message.text.strip()
+    
+    # اعتبارسنجی لینک
+    if not is_valid_url(url):
+        bot.reply_to(message, "⚠️ لینک معتبر یوتیوب وارد کنید")
         return
     
-    try:
-        # بررسی اولیه ویدیو
-        info = get_video_info(message.text)
-        if info.get('filesize_approx', 0) > MAX_FILE_SIZE:
-            bot.reply_to(message, "⚠️ حجم ویدیو بیش از حد مجاز (2GB) است")
-            return
-        
-        # ایجاد منوی کیفیت
-        markup = telebot.types.InlineKeyboardMarkup()
-        markup.row(
-            telebot.types.InlineKeyboardButton("کیفیت پایین", callback_data=f"low#{message.text}"),
-            telebot.types.InlineKeyboardButton("کیفیت متوسط", callback_data=f"medium#{message.text}")
-        )
-        markup.row(telebot.types.InlineKeyboardButton("کیفیت بالا", callback_data=f"high#{message.text}"))
-        
-        bot.send_message(
-            message.chat.id,
-            f"📹 {info['title']}\n"
-            f"🕒 مدت: {info.get('duration_string', 'نامعلوم')}\n\n"
-            "لطفاً کیفیت مورد نظر را انتخاب کنید:",
-            reply_markup=markup
-        )
-    except Exception as e:
-        bot.reply_to(message, f"❌ خطا: {str(e)}")
+    # ارسال پیام وضعیت
+    status_msg = bot.reply_to(message, "🔍 در حال بررسی ویدیو...")
+    
+    # اجرای دانلود در پس‌زمینه
+    def download_task():
+        try:
+            result = download_video(url)
+            if isinstance(result, str):  # خطا
+                bot.edit_message_text(result, message.chat.id, status_msg.message_id)
+            else:  # موفق
+                file_path = os.path.join(DOWNLOAD_DIR, f"{result['title']}.{result['ext']}")
+                with open(file_path, 'rb') as f:
+                    bot.send_video(
+                        chat_id=message.chat.id,
+                        video=f,
+                        caption=f"🎬 {result['title']}\n🕒 مدت: {result.get('duration_string', '?')}",
+                        reply_to_message_id=message.message_id
+                    )
+                os.remove(file_path)
+        except Exception as e:
+            bot.edit_message_text(f"❌ خطای سیستمی: {str(e)}", message.chat.id, status_msg.message_id)
+    
+    executor.submit(download_task)
 
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callback(call):
-    """پردازش انتخاب کیفیت"""
+def is_valid_url(url):
     try:
-        quality, video_url = call.data.split('#')
-        bot.answer_callback_query(call.id, "در حال پردازش...")
-        bot.edit_message_reply_markup(
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=None
-        )
-        
-        # اضافه به صف دانلود
-        download_queue.put((call.message, video_url, quality))
-        queue_size = download_queue.qsize()
-        
-        if queue_size == 1:
-            bot.send_message(call.message.chat.id, "⏳ دانلود شروع شد...")
-        else:
-            bot.send_message(call.message.chat.id, f"⏳ در صف دانلود: موقعیت #{queue_size}")
-            
-    except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ خطا: {str(e)}")
+        result = urlparse(url)
+        return all([result.scheme, result.netloc]) and \
+               any(d in result.netloc for d in ['youtube.com', 'youtu.be'])
+    except:
+        return False
 
-print("✅ ربات آماده به کار است...")
-bot.infinity_polling()
+if __name__ == '__main__':
+    print("✅ ربات آماده به کار است...")
+    bot.infinity_polling()
