@@ -16,7 +16,6 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 # تنظیمات yt-dlp برای جلوگیری از خطاهای 403
 ydl_opts_base = {
-    'proxy': 'http://127.0.0.1:8080',
     'quiet': True,
     'no_warnings': True,
     'restrictfilenames': True,
