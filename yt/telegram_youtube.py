@@ -1,5 +1,5 @@
 import telegram
-from telegram.ext import Updater,CommandHandler,MessageHandler,Filters,ConversationHandler
+from telegram.ext import Updater,CommandHandler,MessageHandler,filters,ConversationHandler
 import os, shutil
 from telegram import ReplyKeyboardRemove, ReplyKeyboardMarkup
 from youtube import *
@@ -216,8 +216,8 @@ def main():
 
         states = states,
 
-        fallbacks = [CommandHandler('cancle', start), CommandHandler('start', start), MessageHandler(Filters.regex('^exit$'), stop_conversation),
-                    MessageHandler(Filters.regex('^🏠 home$'), start_co)],
+        fallbacks = [CommandHandler('cancle', start), CommandHandler('start', start), MessageHandler(filters.regex('^exit$'), stop_conversation),
+                    MessageHandler(filters.regex('^🏠 home$'), start_co)],
 
         conversation_timeout = 50000, 
     )
@@ -264,26 +264,26 @@ def remake_folder(folder_name):
 if __name__ == '__main__':
 
 
-    same = [CommandHandler('cancle', cancle), MessageHandler(Filters.regex('^exit$'), stop_conversation), MessageHandler(Filters.regex('^🏠 home$'), start)]
+    same = [CommandHandler('cancle', cancle), MessageHandler(filters.regex('^exit$'), stop_conversation), MessageHandler(filters.regex('^🏠 home$'), start)]
 
 
     states = {
             START_CO : [CommandHandler('start', start),
-                        MessageHandler(Filters.regex('^Download entire channel$'), start_co),
-                        MessageHandler(Filters.regex('^Download with searching word$'), start_co),
-                        MessageHandler(Filters.regex('^Download one video$'), start_co),
-                        MessageHandler(Filters.regex('^See processes$'), how_many_thread_is_alive),
+                        MessageHandler(filters.regex('^Download entire channel$'), start_co),
+                        MessageHandler(filters.regex('^Download with searching word$'), start_co),
+                        MessageHandler(filters.regex('^Download one video$'), start_co),
+                        MessageHandler(filters.regex('^See processes$'), how_many_thread_is_alive),
                         ],
             
-            GET_WORD : same + [CommandHandler('start', start), MessageHandler(Filters.text , get_word_for_search)],
+            GET_WORD : same + [CommandHandler('start', start), MessageHandler(filters.text , get_word_for_search)],
 
-            GET_NUMBER : same + [CommandHandler('start', start), MessageHandler(Filters.text , get_number_of_videos)],
+            GET_NUMBER : same + [CommandHandler('start', start), MessageHandler(filters.text , get_number_of_videos)],
 
-            GET_CHANNEL_URL : same + [CommandHandler('start', start), MessageHandler(Filters.text , get_channel_url)],
+            GET_CHANNEL_URL : same + [CommandHandler('start', start), MessageHandler(filters.text , get_channel_url)],
 
-            GET_URL : same + [CommandHandler('start', start), MessageHandler(Filters.text , one_video_download)],
+            GET_URL : same + [CommandHandler('start', start), MessageHandler(filters.text , one_video_download)],
 
-            CONFIRMATION : [CommandHandler('start', start), MessageHandler(Filters.regex('^I confirm$'), confirmation)],
+            CONFIRMATION : [CommandHandler('start', start), MessageHandler(filters.regex('^I confirm$'), confirmation)],
 
             
 
